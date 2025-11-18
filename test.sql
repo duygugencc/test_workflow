@@ -1,0 +1,1 @@
+select "test" as name, 1 as status
