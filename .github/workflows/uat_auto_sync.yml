@@ -12,7 +12,12 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: write
+  contents: write       # Required to push to UAT
+  statuses: write       # Required to set required status check
+
+concurrency:
+  group: uat-sync       # Ensures only one sync runs at a time
+  cancel-in-progress: false
 
 # A workflow run is made up of one or more jobs that can run sequentially or in parallel
 jobs:
@@ -27,16 +32,33 @@ jobs:
     # Steps represent a sequence of tasks that will be executed as part of the job
     steps:
       # Checks-out your repository under $GITHUB_WORKSPACE, so your job can access it
+      - name: Set UAT sync status check to PENDING (lock UAT merge queue)
+        run: |
+          gh api repos/${GH_REPO}/statuses/${{ github.sha }} \
+            -f state=pending \
+            -f context="uat-sync-status" \
+            -f description="UAT is syncing from Prod. Merges temporarily locked."
+      
       - uses: actions/checkout@v4
+
       - name: Configure git
         run: |
           git config user.name  "git-actions-uat"
           git config user.email "git-actions-uat@users.noreply.github.com"
           git remote set-url origin "https://x-access-token:${GH_TEST_TOKEN}@github.com/${GH_REPO}.git"
+      
       - name: Update UAT branch from master
         run: |
           git fetch origin
           git checkout uat
           git reset --hard origin/main
           git push origin uat --force
+      
+      - name: Mark UAT sync status check as SUCCESS (unlock merge-queue)
+        if: always()  # Runs even if previous steps fail
+        run: |
+          gh api repos/${GH_REPO}/statuses/${{ github.sha }} \
+            -f state=success \
+            -f context="uat-sync-status" \
+            -f description="UAT successfully synced with Prod."
 
