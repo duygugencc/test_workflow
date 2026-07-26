@@ -75,10 +75,10 @@ jobs:
             --format='value(account)'
 
           gcloud storage buckets describe \
-            gs://sambla-data-staging-compliance_cloudbuild
+            gs://sambla-data-staging-compliance_europe-north1_cloudbuild
 
           echo test | gcloud storage cp - \
-            gs://sambla-data-staging-compliance_cloudbuild/github-actions-test.txt
+            gs://sambla-data-staging-compliance_europe-north1_cloudbuild/github-actions-test.txt
 
       - id: validate
         name: Build image without pushing or deploying Prefect
@@ -90,6 +90,7 @@ jobs:
           SLUG=$(printf '%s' "$INTEGRATION_DIR" | tr '/_' '--')
           BUILD_ID=$(gcloud builds submit . \
             --async \
+            --default-buckets-behavior=REGIONAL_USER_OWNED_BUCKET \
             --config=.github/cloudbuild/pr-validation.yaml \
             --substitutions="_ENV=dev,_INTEGRATION_DIR=${INTEGRATION_DIR},_INTEGRATION_SLUG=${SLUG},_PROJECT=${GCP_PROJECT}" \
             --project="$GCP_PROJECT" \
