@@ -38,6 +38,7 @@ POLICY_TAGS_ENABLED = False
 # Fallback row count per chunk for read_and_stage_source_rows, if a table
 # doesn't set its own chunk_size in config.yml.
 DEFAULT_CHUNK_SIZE = 50_000
+# might remove later
 
 
 @task(name="resolve_source_schema", task_run_name="resolve_source_schema-{table_name}-{market_code}")
