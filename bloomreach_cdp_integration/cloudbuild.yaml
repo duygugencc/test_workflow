@@ -1,0 +1,35 @@
+steps:
+# Deploy the Prefect flow
+- name: 'prefecthq/prefect:2.14-python3.11'
+  entrypoint: '/bin/bash'
+  dir: 'bloomreach_cdp_integration'
+  secretEnv: ['prefect_token']
+  args:
+  - '-c'
+  - |
+      ls -la
+      export ENV="$_ENV"
+
+      apt-get update && apt-get install -y curl gnupg jq
+      curl -O https://dl.google.com/dl/cloudsdk/channels/rapid/downloads/google-cloud-sdk-456.0.0-linux-x86_64.tar.gz
+      tar -xf google-cloud-sdk-456.0.0-linux-x86_64.tar.gz
+      ./google-cloud-sdk/install.sh --quiet
+      mv google-cloud-sdk /usr/local/gcloud
+      rm google-cloud-sdk-456.0.0-linux-x86_64.tar.gz
+      export PATH="/usr/local/gcloud/bin:$$PATH"
+
+      apt-get update && apt-get -y install jq
+      pip install --upgrade pip
+      pip install --no-cache-dir -r requirements.txt
+      pip install --no-cache-dir bq-ingestor -c requirements.txt --extra-index-url "https://oauth2accesstoken:$(gcloud auth print-access-token)@europe-north1-python.pkg.dev/data-domain-data-warehouse/python-packages/simple"
+      prefect cloud login --key $(echo "$$prefect_token" | jq -r .$_ENV.api_key) --workspace adamsvensonsamblagroupcom/sambla-group-orchestration-production
+      prefect deploy --name bloomreach_cdp_integration_${_ENV}
+
+options:
+  logging: CLOUD_LOGGING_ONLY
+
+# Get prefect token from Secret Manager
+availableSecrets:
+  secretManager:
+  - versionName: projects/$_PROJECT/secrets/prefect-secrets/versions/latest
+    env: 'prefect_token'

@@ -1,0 +1,74 @@
+markets: &markets
+  se:
+    source_dataset: eu1_5fbfd024_be3b_11f0_9b1d_268b48079fa8_views
+  "no":
+    source_dataset: eu1_b2408680_be46_11f0_a4c5_76a0ec64bdf2_views
+  fi:
+    source_dataset: eu1_8ab3f37c_be46_11f0_bc0c_268b48079fa8_views
+
+# BigQuery Data Catalog policy tag taxonomy metadata
+policy_tags: &policy_tags
+  taxonomy_project: sambla-data-staging-compliance
+  taxonomy_dataset: policy_tags_metadata
+  metadata_table: policy_tags
+  taxonomy_table: taxonomy
+  taxonomy_location: europe-north1
+  # Scoped to these three taxonomies (gdpr_compliance_measures_high/medium/low)
+  taxonomy_ids:
+    - "7698000960465061299"  # gdpr_compliance_measures_high
+    - "8248486934170083143"  # gdpr_compliance_measures_low
+    - "655384675748637071"   # gdpr_compliance_measures_medium
+
+  flatten_prefixes: ["raw_properties_"]
+
+tables: &tables
+  campaign:
+    source_table: campaign
+    primary_key: row_hash
+    # row_hash included because merge_to_final's MERGE joins ON row_hash
+    cluster_fields: ["internal_customer_id", "row_hash"]
+    incremental_field: ingest_timestamp
+    infer_deleted_from_full_load: false
+    flatten_fields: ["raw_properties"]
+    drop_fields: ["properties"]  # excluded via SQL (SELECT * EXCEPT) — never scanned or read
+    apply_policy_tags: true # when true, it overrides/applies policy tags
+    pii_fields: # if not defined, it will go though table schema and apply policy tags if not found
+      raw_properties_recipient: "projects/sambla-data-staging-compliance/locations/europe-north1/taxonomies/7698000960465061299/policyTags/511583085911940693"  # ssn tag — recipient values here are treated at the same sensitivity level
+      raw_properties_city: "projects/sambla-data-staging-compliance/locations/europe-north1/taxonomies/7698000960465061299/policyTags/8896656979282780459"  # city tag
+  
+  customers_external_id:
+    source_table: customers_external_ids
+    primary_key: row_hash
+    # row_hash included because merge_to_final's MERGE joins ON row_hash
+    cluster_fields: ["internal_customer_id", "id_name", "row_hash"]
+    # dedupe_raw_writes selects the direct staging+MERGE path
+    dedupe_raw_writes: true
+    # Row count per chunk when reading this table, only used with dedupe_raw_writes.
+    # Bumped from 50000 — memory stayed around ~40% of the 4Gi limit at that
+    # size, so fewer/bigger chunks trades some memory headroom for fewer
+    # separate staging load jobs (each has its own fixed overhead).
+    chunk_size: 100000
+    infer_deleted_from_full_load: false
+    apply_policy_tags: true # when true, it overrides/applies policy tags
+    pii_fields:
+     id_name: "projects/sambla-data-staging-compliance/locations/europe-north1/taxonomies/7698000960465061299/policyTags/511583085911940693"  # ssn tag — id_name values here are treated at the same sensitivity level
+
+  # To add a new source table, see README.md ("Adding a new source table").
+
+dev:
+  source_project: gcloudltds
+  read_impersonate_sa: sa-bloomreach-cdp-prod@data-domain-data-warehouse.iam.gserviceaccount.com
+  dest_project: sambla-data-staging-compliance
+  dataset: dev_integrations_external
+  markets: *markets
+  tables: *tables
+  policy_tags: *policy_tags
+
+prod:
+  source_project: gcloudltds
+  read_impersonate_sa: sa-bloomreach-cdp-prod@data-domain-data-warehouse.iam.gserviceaccount.com
+  dest_project: sambla-data-staging-compliance
+  dataset: bloomreach_cdp_data_integration_external
+  markets: *markets
+  tables: *tables
+  policy_tags: *policy_tags

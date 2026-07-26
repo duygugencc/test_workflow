@@ -1,0 +1,49 @@
+name: Deploy integration
+description: >
+  Create-if-missing the Cloud Build trigger for one integration + env, run it
+  against the given commit SHA, and wait for it to finish. Fails if the build
+  doesn't end in SUCCESS. Requires the caller to have already authenticated
+  to GCP (google-github-actions/auth) and installed gcloud
+  (google-github-actions/setup-gcloud) in an earlier step.
+inputs:
+  dir:
+    description: Integration root directory, e.g. salus_integration
+    required: true
+  env:
+    description: dev or prod
+    required: true
+  build-sha:
+    description: Commit SHA to build
+    required: true
+  project:
+    description: GCP project hosting the Cloud Build triggers
+    required: false
+    default: sambla-data-staging-compliance
+  region:
+    description: Cloud Build region
+    required: false
+    default: europe-north1
+outputs:
+  status:
+    description: Terminal Cloud Build status (SUCCESS on success)
+    value: ${{ steps.deploy.outputs.status }}
+  build-id:
+    value: ${{ steps.deploy.outputs.build_id }}
+  log-url:
+    value: ${{ steps.deploy.outputs.log_url }}
+runs:
+  using: composite
+  steps:
+    - id: deploy
+      shell: bash
+      env:
+        INPUT_DIR: ${{ inputs.dir }}
+        INPUT_ENV: ${{ inputs.env }}
+        INPUT_BUILD_SHA: ${{ inputs.build-sha }}
+        INPUT_PROJECT: ${{ inputs.project }}
+        INPUT_REGION: ${{ inputs.region }}
+      run: |
+        bash "${{ github.action_path }}/deploy.sh" \
+          "$INPUT_DIR" "$INPUT_ENV" "$INPUT_BUILD_SHA" \
+          "$INPUT_PROJECT" "$INPUT_REGION" \
+          "${{ github.workspace }}/.github/integration-overrides.json"
