@@ -1,0 +1,78 @@
+name: bloomreach_cdp_integration
+prefect-version: 2.14
+
+build:
+- prefect.deployments.steps.run_shell_script:
+    id: get-env
+    script: echo $ENV
+    stream_output: true
+    expand_env_vars: true
+- prefect.deployments.steps.run_shell_script:
+    id: get-access-token
+    script: |
+      gcloud auth print-access-token
+    stream_output: true
+- prefect_docker.deployments.steps.build_docker_image:
+    id: build_image
+    requires: prefect-docker>=0.3.1
+    image_name:
+      europe-north1-docker.pkg.dev/sambla-data-staging-compliance/prefect-containers/bloomreach-cdp-integration-{{get-env.stdout}}
+    dockerfile: Dockerfile
+    platform: linux/amd64
+    tag: latest
+    buildargs:
+      _ENV: '{{ get-env.stdout }}'
+      ACCESS_TOKEN: '{{ get-access-token.stdout }}'
+
+push:
+- prefect_docker.deployments.steps.push_docker_image:
+    requires: prefect-docker>=0.3.1
+    image_name: '{{ build_image.image_name }}'
+    tag: '{{ build_image.tag }}'
+
+pull:
+- prefect.deployments.steps.set_working_directory:
+    directory: /opt/prefect/bloomreach_cdp_integration
+
+deployments:
+- name: bloomreach_cdp_integration_dev
+  version: "1"
+  tags:
+  - dev
+  - bloomreach_cdp_integration_dev
+  - daily
+  description: Run bloomreach_cdp_integration in dev mode for testing
+  entrypoint: flow.py:flow
+  work_pool:
+    name: Staging Project Cloud Run Worker Pool - Serverless Workers
+    work_queue_name:
+    job_variables:
+      image: '{{ build_image.image }}'
+      cpu: "2000m"
+      memory: "4Gi"
+  parameters:
+    env: "dev"
+
+- name: bloomreach_cdp_integration_prod
+  version: "1"
+  tags:
+  - prod
+  - bloomreach_cdp_integration_prod
+  - daily
+  description: >-
+    Run bloomreach_cdp_integration in prod. Scheduled at 05:00 so campaigns
+    and customers_external_id (SE/NO/FI) are ingested and available in
+    BigQuery ahead of the 06:15 dbt run.
+  schedule:
+    cron: "0 5 * * *"
+    timezone: Europe/Stockholm
+  entrypoint: flow.py:flow
+  work_pool:
+    name: Staging Project Cloud Run Worker Pool - Serverless Workers
+    work_queue_name:
+    job_variables:
+      image: '{{ build_image.image }}'
+      cpu: "2000m"
+      memory: "4Gi"
+  parameters:
+    env: "prod"

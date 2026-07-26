@@ -1,0 +1,100 @@
+name: Merge main prod deploy
+
+# On merge to main: for whatever integration(s) changed, create-if-missing
+# the prod Cloud Build trigger and run it against main's tip commit, which
+# rebuilds the Docker image with _ENV=prod and updates the Prefect prod
+# deployment. Files a GitHub issue on failure.
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+  issues: write
+
+concurrency:
+  group: merge-main-prod-deploy
+  cancel-in-progress: false
+
+env:
+  GCP_PROJECT: sambla-data-staging-compliance
+  GCP_REGION: europe-north1
+
+jobs:
+  refs:
+    runs-on: ubuntu-latest
+    outputs:
+      before: ${{ steps.r.outputs.before }}
+      after: ${{ steps.r.outputs.after }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - id: r
+        uses: ./.github/actions/resolve-push-refs
+
+  detect:
+    needs: refs
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.detect.outputs.matrix }}
+      count: ${{ steps.detect.outputs.count }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - id: detect
+        uses: ./.github/actions/detect-changed-integrations
+        with:
+          before-ref: ${{ needs.refs.outputs.before }}
+          after-ref: ${{ needs.refs.outputs.after }}
+      - name: Summary
+        env:
+          CHANGED_INTEGRATIONS: ${{ steps.detect.outputs.list }}
+        run: |
+          echo "Changed integrations (${{ steps.detect.outputs.count }}):"
+          echo "$CHANGED_INTEGRATIONS"
+
+  deploy:
+    needs: detect
+    if: needs.detect.outputs.count != '0'
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        dir: ${{ fromJson(needs.detect.outputs.matrix) }}
+    concurrency:
+      group: prefect-prod-deploy-${{ matrix.dir }}
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@v4
+      - uses: google-github-actions/auth@v2
+        with:
+          credentials_json: ${{ secrets.GCP_CI_SA_KEY }}
+      - uses: google-github-actions/setup-gcloud@v2
+      - uses: ./.github/actions/deploy-integration
+        with:
+          dir: ${{ matrix.dir }}
+          env: prod
+          build-sha: ${{ github.sha }}
+          project: ${{ env.GCP_PROJECT }}
+          region: ${{ env.GCP_REGION }}
+
+  notify-on-failure:
+    needs: [detect, deploy]
+    if: failure()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Annotate
+        run: echo "::error title=main prod-deploy failed::prod deploy run for ${{ github.sha }} failed — investigate immediately"
+      - uses: actions/github-script@v7
+        with:
+          script: |
+            await github.rest.issues.create({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              title: `main prod-deploy failed @ ${context.sha.slice(0, 7)}`,
+              labels: ['ci-failure', 'prod-broken'],
+              body: `Prod deploy for main failed.\n\nCommit: ${context.sha}\nRun: ${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`,
+            });

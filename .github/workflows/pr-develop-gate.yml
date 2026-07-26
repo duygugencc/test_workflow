@@ -1,0 +1,184 @@
+name: PR develop gate
+
+# Gates PRs into develop without changing Prefect: detects which integration
+# directories changed, runs an isolated Cloud Build that builds (but does not
+# push) each Docker image, waits for it, and posts a PR comment. The final "gate" job
+# (constant name regardless of matrix size) should be set as a required
+# status check on develop in branch protection settings.
+
+on:
+  pull_request:
+    branches: [develop]
+    types: [opened, synchronize, reopened]
+
+permissions:
+  contents: read
+  pull-requests: write
+
+concurrency:
+  group: pr-develop-gate-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+env:
+  GCP_PROJECT: sambla-data-staging-compliance
+  GCP_REGION: europe-north1
+
+jobs:
+  detect:
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.detect.outputs.matrix }}
+      count: ${{ steps.detect.outputs.count }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 0
+      - id: detect
+        uses: ./.github/actions/detect-changed-integrations
+        with:
+          before-ref: ${{ github.event.pull_request.base.sha }}
+          after-ref: ${{ github.event.pull_request.head.sha }}
+      - name: Summary
+        env:
+          CHANGED_INTEGRATIONS: ${{ steps.detect.outputs.list }}
+        run: |
+          echo "Changed integrations (${{ steps.detect.outputs.count }}):"
+          echo "$CHANGED_INTEGRATIONS"
+
+  validate:
+    needs: detect
+    if: needs.detect.outputs.count != '0'
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        dir: ${{ fromJson(needs.detect.outputs.matrix) }}
+    concurrency:
+      group: integration-pr-validation-${{ matrix.dir }}
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+      - uses: google-github-actions/auth@v2
+        with:
+          credentials_json: ${{ secrets.GCP_CI_SA_KEY }}
+      - uses: google-github-actions/setup-gcloud@v2
+      - id: validate
+        name: Build image without pushing or deploying Prefect
+        shell: bash
+        env:
+          INTEGRATION_DIR: ${{ matrix.dir }}
+        run: |
+          set -euo pipefail
+          SLUG=$(printf '%s' "$INTEGRATION_DIR" | tr '/_' '--')
+          BUILD_ID=$(gcloud builds submit . \
+            --async \
+            --config=.github/cloudbuild/pr-validation.yaml \
+            --substitutions="_ENV=dev,_INTEGRATION_DIR=${INTEGRATION_DIR},_INTEGRATION_SLUG=${SLUG},_PROJECT=${GCP_PROJECT}" \
+            --project="$GCP_PROJECT" \
+            --region="$GCP_REGION" \
+            --format='value(id)')
+          LOG_URL="https://console.cloud.google.com/cloud-build/builds/${GCP_REGION}/${BUILD_ID}?project=${GCP_PROJECT}"
+          echo "build-id=$BUILD_ID" >> "$GITHUB_OUTPUT"
+          echo "log-url=$LOG_URL" >> "$GITHUB_OUTPUT"
+          STATUS=QUEUED
+          while [[ "$STATUS" =~ ^(QUEUED|WORKING|PENDING)$ ]]; do
+            sleep 10
+            STATUS=$(gcloud builds describe "$BUILD_ID" \
+              --project="$GCP_PROJECT" --region="$GCP_REGION" \
+              --format='value(status)')
+            echo "status: $STATUS"
+          done
+          echo "status=$STATUS" >> "$GITHUB_OUTPUT"
+          [ "$STATUS" = SUCCESS ]
+      - name: Record result
+        if: always()
+        shell: bash
+        env:
+          INTEGRATION_DIR: ${{ matrix.dir }}
+          DEPLOY_OUTCOME: ${{ steps.validate.outcome }}
+          BUILD_STATUS: ${{ steps.validate.outputs.status }}
+          BUILD_ID: ${{ steps.validate.outputs['build-id'] }}
+          LOG_URL: ${{ steps.validate.outputs['log-url'] }}
+        run: |
+          mkdir -p /tmp/results
+          SAFE=$(printf '%s' "$INTEGRATION_DIR" | tr '/ ' '__')
+          jq -n \
+            --arg dir "$INTEGRATION_DIR" \
+            --arg outcome "$DEPLOY_OUTCOME" \
+            --arg buildStatus "$BUILD_STATUS" \
+            --arg buildId "$BUILD_ID" \
+            --arg logUrl "$LOG_URL" \
+            '{dir: $dir, outcome: $outcome, buildStatus: $buildStatus, buildId: $buildId, logUrl: $logUrl}' \
+            > "/tmp/results/${SAFE}.json"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: validation-result-${{ strategy.job-index }}
+          path: /tmp/results/*.json
+          retention-days: 14
+
+  gate:
+    name: PR develop gate
+    needs: [detect, validate]
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        continue-on-error: true
+        with:
+          pattern: validation-result-*
+          merge-multiple: true
+          path: results
+      - id: summarize
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            let rows = [];
+            try {
+              for (const f of fs.readdirSync('results')) {
+                const r = JSON.parse(fs.readFileSync(`results/${f}`, 'utf8'));
+                const ok = r.outcome === 'success' && r.buildStatus === 'SUCCESS';
+                const statusCell = ok ? '✅ success' : `❌ ${r.buildStatus || r.outcome || 'failure'}`;
+                const logCell = r.logUrl ? `[logs](${r.logUrl})` : '—';
+                rows.push(`| ${r.dir} | ${statusCell} | ${logCell} |`);
+              }
+            } catch (e) {
+              // no results dir => matrix was empty, nothing to summarize
+            }
+            const validateResult = '${{ needs.validate.result }}';
+            const detectResult = '${{ needs.detect.result }}';
+            const passed = detectResult === 'success' &&
+              (validateResult === 'success' || validateResult === 'skipped');
+            const buildLine = rows.length
+              ? (passed ? '✅ Built the Docker image in Cloud Build' : '❌ Docker image build failed in Cloud Build')
+              : '✅ No deployable integration changed';
+            const body = [
+              '<!-- pr-develop-gate-report -->',
+              passed ? '### ✅ PR Cloud Build validation passed' : '### ❌ PR Cloud Build validation failed',
+              '',
+              buildLine,
+            ].join('\n');
+
+            const { data: comments } = await github.rest.issues.listComments({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.payload.pull_request.number,
+            });
+            const existing = comments.find(c => c.body.includes('pr-develop-gate-report'));
+            if (existing) {
+              await github.rest.issues.updateComment({
+                owner: context.repo.owner, repo: context.repo.repo, comment_id: existing.id, body,
+              });
+            } else {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner, repo: context.repo.repo,
+                issue_number: context.payload.pull_request.number, body,
+              });
+            }
+
+            if (detectResult !== 'success') core.setFailed(`detect job result: ${detectResult}`);
+            if (validateResult === 'failure') core.setFailed('one or more integration image validations failed');
