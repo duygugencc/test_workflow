@@ -65,6 +65,21 @@ jobs:
         with:
           credentials_json: ${{ secrets.GCP_CI_SA_KEY }}
       - uses: google-github-actions/setup-gcloud@v2
+      
+      - name: Diagnose Cloud Build access
+        run: |
+          set -euo pipefail
+
+          gcloud auth list \
+            --filter=status:ACTIVE \
+            --format='value(account)'
+
+          gcloud storage buckets describe \
+            gs://sambla-data-staging-compliance_cloudbuild
+
+          echo test | gcloud storage cp - \
+            gs://sambla-data-staging-compliance_cloudbuild/github-actions-test.txt
+
       - id: validate
         name: Build image without pushing or deploying Prefect
         shell: bash
