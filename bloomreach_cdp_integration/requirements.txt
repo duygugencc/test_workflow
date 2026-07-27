@@ -1,0 +1,17 @@
+prefect-docker==0.3.1
+prefect-gcp==0.5.1
+pydantic==1.10.6
+gcsfs==2023.10.0
+# Kept below 2.0 as a general safety margin against bq-ingestor's unpinned
+# google-cloud-bigquery chain
+urllib3<2
+# Fix for "Not supported URL scheme http+docker" during
+# build_docker_image: requests>=2.32.0
+requests<2.32
+# Explicit ceiling matching Prefect 2.14.21's own requirement (packaging<24.3).
+# bq-ingestor's google-cloud-bigquery dependency wants packaging>=24.2.0 with
+# no upper bound, and since the base image starts with packaging==23.2 (below
+# that floor), pip is forced to upgrade it — with no ceiling anywhere it picks
+# the newest available (26.2), silently breaking Prefect's own requirement
+# (pip only warns about this, doesn't block the install).
+packaging<24.3,>=24.2

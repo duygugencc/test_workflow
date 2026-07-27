@@ -1,0 +1,31 @@
+name: Resolve push before/after refs
+description: >
+  Resolves a safe before/after SHA pair for a `push` event, falling back
+  gracefully when github.event.before is the all-zeros SHA (new branch) or
+  otherwise unresolvable locally (force-push/rewritten history). Requires the
+  caller's checkout step to use fetch-depth: 0.
+outputs:
+  before:
+    value: ${{ steps.resolve.outputs.before }}
+  after:
+    value: ${{ steps.resolve.outputs.after }}
+runs:
+  using: composite
+  steps:
+    - id: resolve
+      shell: bash
+      run: |
+        set -euo pipefail
+        AFTER="${{ github.sha }}"
+        BEFORE="${{ github.event.before }}"
+        ZERO="0000000000000000000000000000000000000000"
+        if [ -z "$BEFORE" ] || [ "$BEFORE" = "$ZERO" ] || ! git cat-file -e "${BEFORE}^{commit}" 2>/dev/null; then
+          echo "::warning::push 'before' is empty/zero-sha/unknown (new branch, force-push, or rewritten history) — falling back to a single-commit diff"
+          if git cat-file -e "${AFTER}~1" 2>/dev/null; then
+            BEFORE="${AFTER}~1"
+          else
+            BEFORE=$(git hash-object -t tree /dev/null)
+          fi
+        fi
+        echo "before=$BEFORE" >> "$GITHUB_OUTPUT"
+        echo "after=$AFTER" >> "$GITHUB_OUTPUT"

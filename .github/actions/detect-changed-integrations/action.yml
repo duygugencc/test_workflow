@@ -1,0 +1,45 @@
+name: Detect changed integrations
+description: >
+  Diffs before-ref..after-ref and returns integration root directories
+  (active directories containing both prefect.yaml and cloudbuild.yaml,
+  walking up for nested cases) that changed. archive/ is excluded.
+inputs:
+  before-ref:
+    description: Git ref/SHA to diff from
+    required: true
+  after-ref:
+    description: Git ref/SHA to diff to
+    required: true
+outputs:
+  matrix:
+    description: >
+      JSON array of changed integration directories, e.g.
+      ["salus_integration","gdpr_orchestration/gdpr_anonymisation"] (or "[]"
+      when nothing changed) — feed directly into a strategy.matrix.
+    value: ${{ steps.detect.outputs.matrix }}
+  list:
+    description: Newline-separated human-readable list (possibly empty)
+    value: ${{ steps.detect.outputs.list }}
+  count:
+    description: Number of changed integration directories
+    value: ${{ steps.detect.outputs.count }}
+runs:
+  using: composite
+  steps:
+    - id: detect
+      shell: bash
+      run: |
+        set -euo pipefail
+        DIRS_RAW="$(bash "${{ github.action_path }}/detect.sh" "${{ inputs.before-ref }}" "${{ inputs.after-ref }}")"
+        {
+          echo "list<<EOF_DETECT_LIST"
+          echo "$DIRS_RAW"
+          echo "EOF_DETECT_LIST"
+        } >> "$GITHUB_OUTPUT"
+        if [ -z "$DIRS_RAW" ]; then
+          echo "matrix=[]" >> "$GITHUB_OUTPUT"
+          echo "count=0" >> "$GITHUB_OUTPUT"
+        else
+          echo "matrix=$(printf '%s\n' "$DIRS_RAW" | jq -R -s -c 'split("\n") | map(select(length > 0))')" >> "$GITHUB_OUTPUT"
+          echo "count=$(printf '%s\n' "$DIRS_RAW" | grep -c .)" >> "$GITHUB_OUTPUT"
+        fi

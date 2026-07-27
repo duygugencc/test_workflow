@@ -1,0 +1,102 @@
+name: Merge develop confirm
+
+# Lightweight confirmation, not a second heavyweight gate — the PR that
+# merged into develop already validated this exact commit via
+# pr-develop-gate.yml. Re-runs the dev deployment for whatever integration(s)
+# changed and files a GitHub issue if it somehow fails, since develop is
+# expected to always be deployable.
+
+on:
+  push:
+    branches: [develop]
+
+permissions:
+  contents: read
+  issues: write
+
+concurrency:
+  group: merge-develop-confirm
+  cancel-in-progress: true
+
+env:
+  GCP_PROJECT: sambla-data-staging-compliance
+  GCP_REGION: europe-north1
+  CLOUD_BUILD_TRIGGER_PREFIX: ${{ vars.CLOUD_BUILD_TRIGGER_PREFIX }}
+
+jobs:
+  refs:
+    runs-on: ubuntu-latest
+    outputs:
+      before: ${{ steps.r.outputs.before }}
+      after: ${{ steps.r.outputs.after }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - id: r
+        uses: ./.github/actions/resolve-push-refs
+
+  detect:
+    needs: refs
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.detect.outputs.matrix }}
+      count: ${{ steps.detect.outputs.count }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - id: detect
+        uses: ./.github/actions/detect-changed-integrations
+        with:
+          before-ref: ${{ needs.refs.outputs.before }}
+          after-ref: ${{ needs.refs.outputs.after }}
+      - name: Summary
+        env:
+          CHANGED_INTEGRATIONS: ${{ steps.detect.outputs.list }}
+        run: |
+          echo "Changed integrations (${{ steps.detect.outputs.count }}):"
+          echo "$CHANGED_INTEGRATIONS"
+
+  deploy:
+    needs: detect
+    if: needs.detect.outputs.count != '0'
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        dir: ${{ fromJson(needs.detect.outputs.matrix) }}
+    concurrency:
+      group: prefect-dev-deploy-${{ matrix.dir }}
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@v4
+      - uses: google-github-actions/auth@v2
+        with:
+          credentials_json: ${{ secrets.GCP_CI_SA_KEY }}
+      - uses: google-github-actions/setup-gcloud@v2
+      - uses: ./.github/actions/deploy-integration
+        with:
+          dir: ${{ matrix.dir }}
+          env: dev
+          build-sha: ${{ github.sha }}
+          project: ${{ env.GCP_PROJECT }}
+          region: ${{ env.GCP_REGION }}
+
+  notify-on-failure:
+    needs: [detect, deploy]
+    if: failure()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Annotate
+        run: echo "::error title=develop dev-deploy failed::confirmation run for ${{ github.sha }} failed — develop tip may not be deployable, investigate immediately"
+      - uses: actions/github-script@v7
+        with:
+          script: |
+            await github.rest.issues.create({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              title: `develop dev-deploy confirmation failed @ ${context.sha.slice(0, 7)}`,
+              labels: ['ci-failure', 'develop-broken'],
+              body: `Post-merge confirmation deploy for develop failed.\n\nCommit: ${context.sha}\nRun: ${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`,
+            });

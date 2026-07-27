@@ -1,0 +1,35 @@
+# PR-only validation. This builds the integration image but deliberately does
+# not push it and never calls `prefect deploy`, so the shared dev deployment is
+# untouched until the change is merged into develop.
+steps:
+  - id: access-token
+    name: gcr.io/google.com/cloudsdktool/cloud-sdk:slim
+    entrypoint: bash
+    args:
+      - -ceu
+      - gcloud auth print-access-token > /workspace/access-token
+
+  - id: build-image
+    name: gcr.io/cloud-builders/docker
+    entrypoint: bash
+    args:
+      - -ceu
+      - |
+        docker build \
+          --build-arg env="${_ENV}" \
+          --build-arg _ENV="${_ENV}" \
+          --build-arg ACCESS_TOKEN="$$(cat /workspace/access-token)" \
+          --file "${_INTEGRATION_DIR}/Dockerfile" \
+          --tag "pr-validation/${_INTEGRATION_SLUG}:${BUILD_ID}" \
+          "${_INTEGRATION_DIR}"
+
+substitutions:
+  _ENV: dev
+  _INTEGRATION_DIR: unused
+  _INTEGRATION_SLUG: unused
+  _PROJECT: sambla-data-staging-compliance
+
+serviceAccount: projects/${_PROJECT}/serviceAccounts/de-sgds-integration@${_PROJECT}.iam.gserviceaccount.com
+
+options:
+  logging: CLOUD_LOGGING_ONLY

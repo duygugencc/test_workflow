@@ -1,0 +1,30 @@
+{
+  "defaults": {
+    "service_account": "de-sgds-integration@sambla-data-staging-compliance.iam.gserviceaccount.com",
+    "environment_substitution": "_ENV"
+  },
+  "overrides": {
+    "query_scheduler": {
+      "trigger_base_name": "leaddesk-query-scheduler"
+    },
+    "google_trends_integration": {
+      "trigger_base_name": "google-trends"
+    },
+    "gdpr_orchestration/gdpr_aead_key_deletion": {
+      "trigger_base_name": "gdpr-key-deletion",
+      "prod_trigger_name": "gdpr-key-deletion"
+    },
+    "wincher_integration": {
+      "service_account": "de-sgds-integration@sambla-data-staging-compliance.iam.gserviceaccount.com"
+    },
+    "norstat_integration": {
+      "service_account": "de-sgds-integration@sambla-data-staging-compliance.iam.gserviceaccount.com"
+    },
+    "data_science_integrations": {
+      "service_account": "de-sgds-integration@sambla-data-staging-compliance.iam.gserviceaccount.com"
+    },
+    "mymoney_integration": {
+      "environment_substitution": "_ENVIRONMENT"
+    }
+  }
+}
