@@ -146,6 +146,7 @@ def read_and_write_source_chunks(credentials, source_project, source_dataset, ta
     else:
         logger.info(f"[{entity}] reading from Bloomreach CDP (full table, chunked)")
 
+    # testing
     job_config = bigquery.QueryJobConfig(query_parameters=query_parameters)
     client = bigquery.Client(project=source_project, credentials=credentials)
     rows = client.query(query, job_config=job_config).result(page_size=chunk_size)

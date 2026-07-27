@@ -40,13 +40,12 @@ REPO_OWNER="${REPOSITORY%%/*}"
 REPO_NAME="${REPOSITORY#*/}"
 TRIGGER_PREFIX="${CLOUD_BUILD_TRIGGER_PREFIX:-}"
 
-TRIGGER_NAME="${TRIGGER_PREFIX}${TRIGGER_NAME}"
-
 PROD_OVERRIDE=""
 if [ "$ENV" = "prod" ]; then
   PROD_OVERRIDE=$(jq -r --arg d "$DIR" '.overrides[$d].prod_trigger_name // empty' "$OVERRIDES")
 fi
 TRIGGER_NAME="${PROD_OVERRIDE:-${TRIGGER_BASE}-${ENV}}"
+TRIGGER_NAME="${TRIGGER_PREFIX}${TRIGGER_NAME}"
 
 SA=$(jq -r --arg d "$DIR" '.overrides[$d].service_account // empty' "$OVERRIDES")
 SA="${SA:-$DEFAULT_SA}"
