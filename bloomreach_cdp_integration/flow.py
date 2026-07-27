@@ -54,7 +54,9 @@ def read_and_stage_source_rows(credentials, source_project, source_dataset, tabl
                                 dest_client, staging_table, all_keys, flatten_fields, drop_fields=None,
                                 chunk_size=DEFAULT_CHUNK_SIZE):
     """Reads table_name and appends it into staging_table in chunk_size
-    batches — only one chunk's worth of records is ever in memory at a time."""
+    batches — only one chunk's worth of records is ever in memory at a time.
+    used for all the tables
+    """
     logger = get_run_logger()
     entity = f"{table_name}_{market_code}"
     full_table = f"{source_project}.{source_dataset}.{table_name}"
