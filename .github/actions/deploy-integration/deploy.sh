@@ -94,7 +94,8 @@ if ! gcloud builds triggers describe "$TRIGGER_NAME" \
     --project="$PROJECT" --region="$REGION"
   rm -f "$TMP_YAML"
 else
-  echo "Trigger $TRIGGER_NAME already exists — reusing it"
+  echo "Trigger $TRIGGER_NAME already exists — skipping it"
+  exit 0
 fi
 
 echo "Running $TRIGGER_NAME against commit $SHA"
