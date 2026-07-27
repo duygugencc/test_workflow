@@ -20,6 +20,7 @@ concurrency:
 env:
   GCP_PROJECT: sambla-data-staging-compliance
   GCP_REGION: europe-north1
+  CLOUD_BUILD_TRIGGER_PREFIX: ${{ vars.CLOUD_BUILD_TRIGGER_PREFIX }}
 
 jobs:
   refs:

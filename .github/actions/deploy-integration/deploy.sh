@@ -18,6 +18,8 @@ PROJECT="$4"
 REGION="$5"
 OVERRIDES="${6:-.github/integration-overrides.json}"
 
+
+
 if [ "$ENV" != "dev" ] && [ "$ENV" != "prod" ]; then
   echo "Environment must be dev or prod (got '$ENV')" >&2
   exit 1
@@ -32,6 +34,13 @@ DEFAULT_SA=$(jq -r '.defaults.service_account' "$OVERRIDES")
 
 TRIGGER_BASE=$(jq -r --arg d "$DIR" '.overrides[$d].trigger_base_name // empty' "$OVERRIDES")
 TRIGGER_BASE="${TRIGGER_BASE:-$DEFAULT_BASE}"
+
+REPOSITORY="${GITHUB_REPOSITORY:-Advisa/de-ingestion-orchestration}"
+REPO_OWNER="${REPOSITORY%%/*}"
+REPO_NAME="${REPOSITORY#*/}"
+TRIGGER_PREFIX="${CLOUD_BUILD_TRIGGER_PREFIX:-}"
+
+TRIGGER_NAME="${TRIGGER_PREFIX}${TRIGGER_NAME}"
 
 PROD_OVERRIDE=""
 if [ "$ENV" = "prod" ]; then
@@ -66,8 +75,8 @@ if ! gcloud builds triggers describe "$TRIGGER_NAME" \
     echo "description: \"Auto-created by GitHub Actions CI for ${DIR} [${ENV}]\""
     echo "serviceAccount: projects/${PROJECT}/serviceAccounts/${SA}"
     echo "github:"
-    echo "  owner: Advisa"
-    echo "  name: de-ingestion-orchestration"
+    echo "  owner: ${REPO_OWNER}"
+    echo "  name: ${REPO_NAME}"
     echo "  push:"
     if [ "$ENV" = "dev" ]; then
       echo "    branch: ^develop\$"
